@@ -1,0 +1,7 @@
+services:
+  weight-tasks:
+    image: ghcr.io/watsona4/weight-tasks:latest
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
