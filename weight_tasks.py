@@ -1,10 +1,9 @@
 import logging
 import os
-import sys
-from datetime import datetime, timedelta
+import time
+from datetime import date, datetime, timedelta
 from typing import Union
 
-import click
 import numpy as np
 from google.auth.transport.requests import Request  # type: ignore
 from google.oauth2.credentials import Credentials  # type: ignore
@@ -36,17 +35,6 @@ DAY_DATA: list[tuple[Union[str, int], ...]] = [
 ]
 
 
-@click.command()
-@click.option(
-    "--auth/--no-auth",
-    default=False,
-    help="If enabled, only re-loads credentials to maintain valid tokens for future execution.",
-)
-@click.option(
-    "--verbose/--no-verbose",
-    default=False,
-    help="Enables debug logging.",
-)
 def main(auth: bool, verbose: bool) -> int:
 
     if verbose:
@@ -56,9 +44,9 @@ def main(auth: bool, verbose: bool) -> int:
     LOG.debug(f"{auth=}")
 
     creds = None
-    if os.path.exists("token.json"):
+    if os.path.exists("/data/token.json"):
         LOG.info("Token file exists, reading creds from file")
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+        creds = Credentials.from_authorized_user_file("/data/token.json", SCOPES)
 
     if not creds or not creds.valid:
         LOG.warning("Creds invalid!")
@@ -67,11 +55,11 @@ def main(auth: bool, verbose: bool) -> int:
             creds.refresh(Request())
         else:
             LOG.info("Asking user to re-authenticate")
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file("/data/credentials.json", SCOPES)
             creds = flow.run_local_server(port=0)
 
         LOG.info("Creds valid!")
-        with open("token.json", "w") as token:
+        with open("/data/token.json", "w") as token:
             token.write(creds.to_json())
 
     if auth:
@@ -158,4 +146,19 @@ def main(auth: bool, verbose: bool) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    done: bool = False
+    while True:
+        today: date = date.today()
+        now: datetime = datetime.now()
+        LOG.info(f"{today=}, {now=}, {done=}")
+        if not done and today.weekday() == 5 and now.hour >= 22:
+            LOG.info("Generating tasks...")
+            main(auth=False, verbose=True)
+            done = True
+        else:
+            LOG.info("Re-authenticating...")
+            main(auth=True, verbose=True)
+        if done and today.weekday() == 6:
+            LOG.info("Resetting flag...")
+            done = False
+        time.sleep(3600)
