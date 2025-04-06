@@ -1,13 +1,13 @@
 import logging
 import os
+import socket
+import threading
 import time
 from datetime import date, datetime, timedelta
 from typing import Union
 
 import numpy as np
-from google.auth.transport.requests import Request  # type: ignore
-from google.oauth2.credentials import Credentials  # type: ignore
-from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
+from google.oauth2.service_account import Credentials  # type: ignore
 from googleapiclient.discovery import build  # type: ignore
 from scipy.stats.qmc import LatinHypercube  # type: ignore
 
@@ -20,6 +20,7 @@ CALID: str = (
 )
 
 SCOPES: list[str] = ["https://www.googleapis.com/auth/calendar"]
+TOKEN: str = "/data/service_token.json"
 
 NUM_POINTS: int = 10
 MAXMIN: int = 1000
@@ -34,37 +35,38 @@ DAY_DATA: list[tuple[Union[str, int], ...]] = [
     ("Saturday", 630, 2030),
 ]
 
+SOCKET_PATH = "/tmp/unix_socket_example.sock"
 
-def main(auth: bool, verbose: bool) -> int:
+if os.path.exists(SOCKET_PATH):
+    os.remove(SOCKET_PATH)
+
+
+def server():
+    server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server_socket.bind(SOCKET_PATH)
+    server_socket.listen(1)
+    LOG.info("Server listening on %s", SOCKET_PATH)
+
+    while True:
+        conn, addr = server_socket.accept()
+        with conn:
+            LOG.info("Connected by %s", addr)
+            while True:
+                data = conn.recv(1024)
+                if not data:
+                    break
+                LOG.info("Received: %s", data.decode())
+                conn.sendall(data)  # Echo back to client
+
+
+def main(verbose: bool = False) -> int:
 
     if verbose:
         LOG.setLevel(logging.DEBUG)
 
     LOG.info("Current time: %s", datetime.now())
-    LOG.debug(f"{auth=}")
 
-    creds = None
-    if os.path.exists("/data/token.json"):
-        LOG.info("Token file exists, reading creds from file")
-        creds = Credentials.from_authorized_user_file("/data/token.json", SCOPES)
-
-    if not creds or not creds.valid:
-        LOG.warning("Creds invalid!")
-        if creds and creds.expired and creds.refresh_token:
-            LOG.info("Attempting to refresh creds")
-            creds.refresh(Request())
-        else:
-            LOG.info("Asking user to re-authenticate")
-            flow = InstalledAppFlow.from_client_secrets_file("/data/credentials.json", SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        LOG.info("Creds valid!")
-        with open("/data/token.json", "w") as token:
-            token.write(creds.to_json())
-
-    if auth:
-        LOG.info("Re-authentication complete!")
-        return 0
+    creds = Credentials.from_service_account_file(TOKEN, scopes=SCOPES)
 
     service = build("calendar", "v3", credentials=creds)
 
@@ -146,6 +148,9 @@ def main(auth: bool, verbose: bool) -> int:
 
 
 if __name__ == "__main__":
+    server_thread = threading.Thread(target=server)
+    server_thread.daemon = True
+    server_thread.start()
     done: bool = False
     while True:
         today: date = date.today()
@@ -153,11 +158,11 @@ if __name__ == "__main__":
         LOG.info(f"{today=}, {now=}, {done=}")
         if not done and today.weekday() == 5 and now.hour >= 22:
             LOG.info("Generating tasks...")
-            main(auth=False, verbose=True)
+            try:
+                main()
+            except Exception:
+                LOG.exception("Exception in main():")
             done = True
-        else:
-            LOG.info("Re-authenticating...")
-            main(auth=True, verbose=True)
         if done and today.weekday() == 6:
             LOG.info("Resetting flag...")
             done = False

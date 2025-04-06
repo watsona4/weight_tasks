@@ -14,7 +14,9 @@ COPY --from=builder /app/wheels /wheels
 
 RUN pip install --no-cache --break-system-packages /wheels/*
 
-COPY weight_tasks.py .
+COPY weight_tasks.py healthcheck.py ./
+
+HEALTHCHECK CMD python3 healthcheck.py
 
 LABEL org.opencontainers.image.source=https://github.com/watsona4/weight_tasks
 
